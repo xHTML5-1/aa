@@ -24,6 +24,8 @@ dependencies:
   firebase_core: ^2.25.4
   dartz: ^0.10.1
   firebase_messaging: ^14.7.10
+  file_picker: ^6.1.1
+  image: ^4.1.3
 
 dev_dependencies:
   flutter_test:
