@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="tr" class="h-full bg-slate-950 text-slate-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kahve Falı Analizörü</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      color-scheme: light dark;
+    }
+    body {
+      min-height: 100vh;
+      background: radial-gradient(circle at top, rgba(31,41,55,0.9), rgba(2,6,23,1));
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+    .card {
+      backdrop-filter: blur(18px);
+      background: linear-gradient(145deg, rgba(15,23,42,0.92), rgba(30,64,175,0.35));
+      border: 1px solid rgba(148,163,184,0.15);
+      box-shadow: 0 40px 80px rgba(15,23,42,0.65);
+    }
+    .neon-line {
+      filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.8));
+    }
+    .constellation-overlay {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(circle at center, rgba(15, 118, 110, 0.25), rgba(2, 6, 23, 0.95));
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .constellation-overlay.active {
+      display: flex;
+    }
+    .constellation-canvas {
+      width: min(90vw, 700px);
+      height: min(90vh, 700px);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+<body class="h-full">
+  <div class="min-h-screen flex flex-col items-center justify-center py-12 px-4">
+    <main class="w-full max-w-4xl card rounded-3xl p-6 sm:p-10 text-slate-100 shadow-2xl">
+      <header class="text-center mb-10">
+        <h1 class="text-3xl sm:text-4xl font-semibold tracking-tight mb-3">Kahve Falı Sahte-Analizörü</h1>
+        <p class="text-slate-300 text-base sm:text-lg max-w-2xl mx-auto">Fotoğrafınızı yükleyin, telve izlerini neon çizgilerle takip edelim ve evrene umut dolu mesajınızı iletelim. Tüm işlemler cihazınızda gerçekleşir.</p>
+      </header>
+
+      <section class="grid gap-8 md:grid-cols-5" aria-label="Analiz kartı">
+        <div class="md:col-span-2 flex flex-col space-y-4">
+          <label class="block" for="uploadInput">
+            <span class="block text-sm font-medium text-slate-300 mb-1">Kahve fincanı fotoğrafı</span>
+            <input id="uploadInput" type="file" accept="image/*" class="block w-full text-sm text-slate-200 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-emerald-500 file:text-slate-900 hover:file:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500" aria-describedby="statusMessage" />
+          </label>
+          <div class="relative rounded-2xl overflow-hidden border border-slate-700 aspect-square bg-slate-900/60">
+            <canvas id="previewCanvas" class="w-full h-full" aria-hidden="true"></canvas>
+            <div id="previewFallback" class="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">Fotoğraf seçtiğinizde burada önizlenecek.</div>
+          </div>
+          <button id="analyzeButton" class="inline-flex items-center justify-center rounded-full bg-emerald-500 px-6 py-3 font-semibold text-slate-900 hover:bg-emerald-400 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 transition" aria-live="polite">Analiz Et</button>
+          <div class="space-y-2" aria-live="polite">
+            <div class="h-2 rounded-full bg-slate-800 overflow-hidden">
+              <div id="progressBar" class="h-full w-0 bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 transition-all duration-700"></div>
+            </div>
+            <p id="statusMessage" class="text-sm text-slate-300">Hazır bekliyor...</p>
+          </div>
+        </div>
+
+        <div class="md:col-span-3 space-y-6">
+          <div>
+            <h2 class="text-xl font-semibold mb-2">Analiz Sonucu</h2>
+            <div id="resultCard" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-6 min-h-[200px] flex items-center justify-center text-center text-slate-400">
+              Henüz bir fal metni yok. Fotoğraf yükleyip analizi başlatın.
+            </div>
+          </div>
+          <div id="errorCard" class="hidden rounded-2xl border border-rose-600/40 bg-rose-900/30 p-4 text-rose-200"></div>
+          <div class="text-xs text-slate-500">
+            <p>Gizlilik notu: Fotoğrafınız hiçbir yere yüklenmez, analiz tamamen tarayıcınızda gerçekleşir.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="constellationOverlay" class="constellation-overlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <canvas id="constellationCanvas" class="constellation-canvas"></canvas>
+  </div>
+
+  <script>
+    const uploadInput = document.getElementById('uploadInput');
+    const analyzeButton = document.getElementById('analyzeButton');
+    const previewCanvas = document.getElementById('previewCanvas');
+    const previewCtx = previewCanvas.getContext('2d', { willReadFrequently: true });
+    const previewFallback = document.getElementById('previewFallback');
+    const progressBar = document.getElementById('progressBar');
+    const statusMessage = document.getElementById('statusMessage');
+    const resultCard = document.getElementById('resultCard');
+    const errorCard = document.getElementById('errorCard');
+    const constellationOverlay = document.getElementById('constellationOverlay');
+    const constellationCanvas = document.getElementById('constellationCanvas');
+    const constellationCtx = constellationCanvas.getContext('2d');
+
+    const MAX_LONG_EDGE = 1024;
+    const SAMPLE_STEP = 3;
+
+    let loadedImage = null;
+    let imageDataCache = null;
+
+    const fortunes = [
+      {
+        title: 'Aşkın Fısıltısı',
+        body: `Kalbinin etrafında usul usul biriken telveler, geçmişteki bir bekleyişin sabrını anlatıyor. Şimdilerde içten, yumuşak bir sohbetle başlayacak olan yeni bir bağ kapıda. 
+
+İkinci paragrafta fincanın kıyısındaki parlaklık, karşılıklı anlayışı vurguluyor. Acele etmeden, her bir cümleyi tadını çıkararak dinlediğinde bağ daha da güçlenecek.`
+      },
+      {
+        title: 'Kariyer Ufukları',
+        body: `Telvenin kuzeye bakan koyu kümeleri, bir süredir zihnini meşgul eden fikirlerin artık somut adımlara dönüşeceğini söylüyor. Sabırlı planların meyvesini toplama zamanı yaklaşıyor. 
+
+İçteki spiral izler, farklı disiplinleri bir araya getirmeni işaret ediyor. Esnek kal, yeni iş birliklerine açık ol; ufukta parlayan bir fırsat seni bekliyor.`
+      },
+      {
+        title: 'Yolculuk Daveti',
+        body: `Fincanın kenarında uzayan çizgiler, uzaklardan gelen bir çağrıyı taşıyor. Bu yol, sadece fiziksel bir seyahat değil, içsel bir keşif anlamına da geliyor. 
+
+Hazırlığını yaparken hafif kal, her durağı merakla incele. Karşılaşacağın insanlar sana yeni pencereler açacak.`
+      },
+      {
+        title: 'Kısmetin İzleri',
+        body: `Telve yoğunluğundaki küçük ışımalar, hayatına beklenmedik sevinçlerin serpileceğini anlatıyor. Bu enerji, yakın çevrenden gelecek nazik bir destekle tetiklenecek. 
+
+Yoluna çıkan her nazik teklife teşekkürle yaklaş; minik adımlar büyük mutlulukları çağıracak.`
+      },
+      {
+        title: 'Şanslı Tesadüfler',
+        body: `Koyu noktaların etrafındaki halka, evrenin senin için küçük sürprizler hazırladığını gösteriyor. Bir proje ya da fikir, tam da doğru anda karşına çıkabilir. 
+
+Bu dönemde sezgilerine güven, gündelik rutinin içinde bile seni gülümsetecek yeni rastlantılar var.`
+      },
+      {
+        title: 'Sürpriz Harmanı',
+        body: `Telvedeki ritmik desenler, beklenmedik bir davetle karşılaşacağını haber veriyor. Bu davet, yeni bir hobi ya da yaratıcı bir alanla tanışmana vesile olabilir. 
+
+Kendine alan aç, şüphelerin kıyısında oyalanma. Seçtiğin her yeni uğraş sana umut ve canlılık getirecek.`
+      }
+    ];
+
+    uploadInput.addEventListener('change', handleFileUpload);
+    analyzeButton.addEventListener('click', () => {
+      if (!loadedImage) {
+        displayError('Lütfen önce bir kahve fincanı fotoğrafı yükleyin.');
+        return;
+      }
+      resetUIForAnalysis();
+      window.requestAnimationFrame(() => runAnalysis());
+    });
+
+    function handleFileUpload(event) {
+      clearError();
+      const file = event.target.files && event.target.files[0];
+      if (!file) {
+        displayError('Dosya seçilemedi, lütfen tekrar deneyin.');
+        return;
+      }
+      if (!file.type.startsWith('image/')) {
+        displayError('Desteklenmeyen dosya türü. Lütfen bir resim dosyası seçin.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const { width, height } = scaleDimensions(img.width, img.height, MAX_LONG_EDGE);
+          previewCanvas.width = width;
+          previewCanvas.height = height;
+          previewCtx.clearRect(0, 0, width, height);
+          previewCtx.drawImage(img, 0, 0, width, height);
+          previewFallback.classList.add('hidden');
+          loadedImage = img;
+          imageDataCache = previewCtx.getImageData(0, 0, width, height);
+          statusMessage.textContent = 'Fotoğraf yüklendi. Analize hazır.';
+        };
+        img.onerror = () => displayError('Görsel yüklenemedi. Farklı bir dosya deneyin.');
+        img.src = e.target.result;
+      };
+      reader.onerror = () => displayError('Dosya okunamadı. Lütfen tekrar deneyin.');
+      reader.readAsDataURL(file);
+    }
+
+    function scaleDimensions(width, height, maxEdge) {
+      const scale = Math.min(1, maxEdge / Math.max(width, height));
+      return {
+        width: Math.round(width * scale),
+        height: Math.round(height * scale)
+      };
+    }
+
+    function resetUIForAnalysis() {
+      progressBar.style.width = '0%';
+      statusMessage.textContent = 'Analiz başlıyor...';
+      resultCard.textContent = 'Telve izleri takip ediliyor...';
+      errorCard.classList.add('hidden');
+      errorCard.textContent = '';
+    }
+
+    async function runAnalysis() {
+      try {
+        const totalStages = 6;
+        let currentStage = 0;
+        const updateStage = (message) => {
+          currentStage += 1;
+          const progress = Math.min(100, Math.round((currentStage / totalStages) * 100));
+          progressBar.style.width = `${progress}%`;
+          statusMessage.textContent = message;
+        };
+
+        updateStage('Fincan doğrulaması yapılıyor...');
+        const grayscale = toGrayscale(imageDataCache);
+        if (!passesCupCheck(grayscale)) {
+          throw new Error('cup');
+        }
+
+        updateStage('Telve izleri aranıyor...');
+        const groundsPoints = collectGroundsPoints(grayscale);
+        if (groundsPoints.length < 30) {
+          throw new Error('grounds');
+        }
+
+        updateStage('Katmanlar analiz ediliyor...');
+        const clusters = kMeans(groundsPoints, Math.min(5, Math.max(3, Math.round(groundsPoints.length / 400))));
+
+        updateStage('Neon çizgiler hazırlanıyor...');
+        const hulls = clusters.map(cluster => convexHull(cluster.points)).filter(h => h.length >= 3);
+
+        updateStage('İz sürülüyor...');
+        await animateNeonContours(hulls);
+
+        updateStage('Yıldız tozu yayılıyor...');
+        await playConstellationScene();
+
+        displayFortune();
+        statusMessage.textContent = 'Fal metni hazır. Güzel haberler seninle.';
+      } catch (error) {
+        progressBar.style.width = '0%';
+        if (error.message === 'cup') {
+          displayError('Bu fotoğraf kahve fincanına benzemiyor. Daha net bir fincan fotoğrafı deneyin.');
+        } else if (error.message === 'grounds') {
+          displayError('Telve algılanamadı, başka açı/ışıkla dener misiniz?');
+        } else {
+          console.error(error);
+          displayError('Beklenmeyen bir durum oluştu. Lütfen tekrar deneyin.');
+        }
+      }
+    }
+
+    function toGrayscale(imageData) {
+      const { data, width, height } = imageData;
+      const sampleWidth = Math.ceil(width / SAMPLE_STEP);
+      const sampleHeight = Math.ceil(height / SAMPLE_STEP);
+      const grayscale = new Float32Array(sampleWidth * sampleHeight);
+      for (let y = 0; y < height; y += SAMPLE_STEP) {
+        const sy = Math.floor(y / SAMPLE_STEP);
+        for (let x = 0; x < width; x += SAMPLE_STEP) {
+          const sx = Math.floor(x / SAMPLE_STEP);
+          const idx = (y * width + x) * 4;
+          const r = data[idx];
+          const g = data[idx + 1];
+          const b = data[idx + 2];
+          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+          grayscale[sy * sampleWidth + sx] = gray;
+        }
+      }
+      return {
+        data: grayscale,
+        width: sampleWidth,
+        height: sampleHeight
+      };
+    }
+
+    function passesCupCheck(grayscale) {
+      const { data, width, height } = grayscale;
+      const centerX = width / 2;
+      const centerY = height / 2;
+      const maxRadius = Math.min(centerX, centerY);
+      const rings = 8;
+      const ringValues = [];
+
+      for (let i = 1; i <= rings; i++) {
+        const inner = ((i - 1) / rings) * maxRadius;
+        const outer = (i / rings) * maxRadius;
+        let sum = 0;
+        let count = 0;
+        for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 90) {
+          const radius = (inner + outer) / 2;
+          const x = Math.floor(centerX + Math.cos(angle) * radius);
+          const y = Math.floor(centerY + Math.sin(angle) * radius);
+          if (x >= 0 && y >= 0 && x < width && y < height) {
+            sum += data[y * width + x];
+            count += 1;
+          }
+        }
+        ringValues.push(sum / Math.max(count, 1));
+      }
+
+      if (ringValues.length < 3) return false;
+      const outerAvg = (ringValues[0] + ringValues[1]) / 2;
+      const rimAvg = ringValues[Math.floor(ringValues.length / 2)];
+      const innerAvg = ringValues[ringValues.length - 1];
+
+      const brightnessDelta = rimAvg - outerAvg;
+      const innerVariance = calculateVariance(ringValues.slice(-3));
+
+      return brightnessDelta > 12 && innerVariance > 8;
+    }
+
+    function calculateVariance(values) {
+      const mean = values.reduce((acc, v) => acc + v, 0) / values.length;
+      return values.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / values.length;
+    }
+
+    function collectGroundsPoints(grayscale) {
+      const { data, width, height } = grayscale;
+      const points = [];
+      const values = Array.from(data);
+      const mean = values.reduce((acc, v) => acc + v, 0) / values.length;
+      const variance = calculateVariance(values);
+      const stdDev = Math.sqrt(variance);
+      const threshold = mean - stdDev * 0.25;
+
+      for (let y = 2; y < height - 2; y++) {
+        for (let x = 2; x < width - 2; x++) {
+          const value = data[y * width + x];
+          if (value < threshold) {
+            points.push({ x, y });
+          }
+        }
+      }
+      return points;
+    }
+
+    function kMeans(points, k, maxIterations = 10) {
+      if (points.length === 0) return [];
+      const centroids = initializeCentroids(points, k);
+      let assignments = new Array(points.length).fill(-1);
+
+      for (let iteration = 0; iteration < maxIterations; iteration++) {
+        let moved = false;
+        for (let i = 0; i < points.length; i++) {
+          const point = points[i];
+          let bestIndex = 0;
+          let bestDistance = Infinity;
+          for (let j = 0; j < centroids.length; j++) {
+            const centroid = centroids[j];
+            const dx = point.x - centroid.x;
+            const dy = point.y - centroid.y;
+            const distance = dx * dx + dy * dy;
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestIndex = j;
+            }
+          }
+          if (assignments[i] !== bestIndex) {
+            assignments[i] = bestIndex;
+            moved = true;
+          }
+        }
+        if (!moved) break;
+        const sums = centroids.map(() => ({ x: 0, y: 0, count: 0 }));
+        for (let i = 0; i < points.length; i++) {
+          const clusterIndex = assignments[i];
+          const sum = sums[clusterIndex];
+          sum.x += points[i].x;
+          sum.y += points[i].y;
+          sum.count += 1;
+        }
+        for (let j = 0; j < centroids.length; j++) {
+          if (sums[j].count > 0) {
+            centroids[j] = {
+              x: sums[j].x / sums[j].count,
+              y: sums[j].y / sums[j].count
+            };
+          }
+        }
+      }
+
+      const clusters = centroids.map(() => ({ points: [] }));
+      for (let i = 0; i < points.length; i++) {
+        const clusterIndex = assignments[i];
+        if (clusterIndex >= 0) {
+          clusters[clusterIndex].points.push(points[i]);
+        }
+      }
+      return clusters.filter(cluster => cluster.points.length > 20);
+    }
+
+    function initializeCentroids(points, k) {
+      const centroids = [];
+      const used = new Set();
+      while (centroids.length < k && centroids.length < points.length) {
+        const index = Math.floor(Math.random() * points.length);
+        if (!used.has(index)) {
+          used.add(index);
+          centroids.push({ ...points[index] });
+        }
+      }
+      return centroids;
+    }
+
+    function convexHull(points) {
+      const uniquePoints = Array.from(new Set(points.map(p => `${p.x},${p.y}`))).map(str => {
+        const [x, y] = str.split(',').map(Number);
+        return { x, y };
+      });
+      if (uniquePoints.length < 3) return [];
+      uniquePoints.sort((a, b) => (a.x === b.x ? a.y - b.y : a.x - b.x));
+
+      const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+      const lower = [];
+      for (const point of uniquePoints) {
+        while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) {
+          lower.pop();
+        }
+        lower.push(point);
+      }
+      const upper = [];
+      for (let i = uniquePoints.length - 1; i >= 0; i--) {
+        const point = uniquePoints[i];
+        while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) {
+          upper.pop();
+        }
+        upper.push(point);
+      }
+      upper.pop();
+      lower.pop();
+      return lower.concat(upper);
+    }
+
+    async function animateNeonContours(hulls) {
+      const duration = 10000;
+      const start = performance.now();
+      const ctx = previewCtx;
+      const { width, height } = previewCanvas;
+      ctx.save();
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(loadedImage, 0, 0, width, height);
+      previewFallback.classList.add('hidden');
+
+      const neonColor = 'rgba(16, 185, 129, 0.9)';
+      const glowColor = 'rgba(16, 185, 129, 0.4)';
+
+      return new Promise((resolve) => {
+        function drawFrame(now) {
+          const elapsed = now - start;
+          const progress = Math.min(1, elapsed / duration);
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(loadedImage, 0, 0, width, height);
+          ctx.lineWidth = 2;
+
+          hulls.forEach((hull, index) => {
+            const phase = (index + 1) / (hulls.length + 1);
+            const localProgress = Math.min(1, Math.max(0, (progress * (1 + phase)) - phase));
+            if (localProgress <= 0) return;
+            const pathLength = hull.length;
+            const drawCount = Math.max(2, Math.floor(pathLength * localProgress));
+            ctx.beginPath();
+            for (let i = 0; i < drawCount; i++) {
+              const point = hull[i % pathLength];
+              if (i === 0) {
+                ctx.moveTo(point.x * SAMPLE_STEP, point.y * SAMPLE_STEP);
+              } else {
+                ctx.lineTo(point.x * SAMPLE_STEP, point.y * SAMPLE_STEP);
+              }
+            }
+            ctx.closePath();
+            ctx.strokeStyle = glowColor;
+            ctx.stroke();
+            ctx.strokeStyle = neonColor;
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = neonColor;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+          });
+
+          if (elapsed < duration) {
+            requestAnimationFrame(drawFrame);
+          } else {
+            ctx.drawImage(loadedImage, 0, 0, width, height);
+            hulls.forEach((hull) => {
+              ctx.beginPath();
+              hull.forEach((point, index) => {
+                const x = point.x * SAMPLE_STEP;
+                const y = point.y * SAMPLE_STEP;
+                if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+              });
+              ctx.closePath();
+              ctx.strokeStyle = neonColor;
+              ctx.lineWidth = 1.5;
+              ctx.stroke();
+            });
+            ctx.restore();
+            resolve();
+          }
+        }
+        requestAnimationFrame(drawFrame);
+      });
+    }
+
+    function resizeConstellationCanvas() {
+      const ratio = window.devicePixelRatio || 1;
+      const rect = constellationCanvas.getBoundingClientRect();
+      constellationCanvas.width = rect.width * ratio;
+      constellationCanvas.height = rect.height * ratio;
+      constellationCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    }
+
+    async function playConstellationScene() {
+      resizeConstellationCanvas();
+      constellationOverlay.classList.add('active');
+      constellationOverlay.setAttribute('aria-hidden', 'false');
+
+      const stars = generateConstellation();
+      const duration = 3000;
+      const start = performance.now();
+      constellationCtx.clearRect(0, 0, constellationCanvas.width, constellationCanvas.height);
+
+      return new Promise((resolve) => {
+        function render(now) {
+          const elapsed = now - start;
+          const t = Math.min(1, elapsed / duration);
+          constellationCtx.clearRect(0, 0, constellationCanvas.width, constellationCanvas.height);
+          drawConstellation(stars, t);
+          if (t < 1) {
+            requestAnimationFrame(render);
+          } else {
+            setTimeout(() => {
+              constellationOverlay.classList.remove('active');
+              constellationOverlay.setAttribute('aria-hidden', 'true');
+              resolve();
+            }, 800);
+          }
+        }
+        requestAnimationFrame(render);
+      });
+    }
+
+    function generateConstellation() {
+      const starCount = 12;
+      const width = constellationCanvas.width / (window.devicePixelRatio || 1);
+      const height = constellationCanvas.height / (window.devicePixelRatio || 1);
+      const stars = [];
+      for (let i = 0; i < starCount; i++) {
+        stars.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          radius: Math.random() * 2 + 1,
+          delay: Math.random() * 0.5
+        });
+      }
+      stars.sort((a, b) => a.x - b.x);
+      return stars;
+    }
+
+    function drawConstellation(stars, progress) {
+      const width = constellationCanvas.width / (window.devicePixelRatio || 1);
+      const height = constellationCanvas.height / (window.devicePixelRatio || 1);
+      constellationCtx.save();
+      const gradient = constellationCtx.createRadialGradient(width / 2, height / 2, 50, width / 2, height / 2, width);
+      gradient.addColorStop(0, 'rgba(20,184,166,0.3)');
+      gradient.addColorStop(1, 'rgba(15,23,42,0)');
+      constellationCtx.fillStyle = gradient;
+      constellationCtx.fillRect(0, 0, width, height);
+
+      constellationCtx.strokeStyle = 'rgba(125, 211, 252, 0.6)';
+      constellationCtx.lineWidth = 1.2;
+      constellationCtx.beginPath();
+      for (let i = 0; i < stars.length - 1; i++) {
+        const a = stars[i];
+        const b = stars[i + 1];
+        const drawUntil = Math.floor(progress * (stars.length - 1));
+        if (i <= drawUntil) {
+          constellationCtx.moveTo(a.x, a.y);
+          constellationCtx.lineTo(b.x, b.y);
+        }
+      }
+      constellationCtx.stroke();
+
+      stars.forEach((star, index) => {
+        const appear = Math.max(0, Math.min(1, (progress - star.delay) * 2));
+        constellationCtx.beginPath();
+        constellationCtx.arc(star.x, star.y, star.radius * appear, 0, Math.PI * 2);
+        constellationCtx.fillStyle = 'rgba(244, 244, 245,' + appear + ')';
+        constellationCtx.shadowBlur = appear * 12;
+        constellationCtx.shadowColor = 'rgba(94, 234, 212, 0.8)';
+        constellationCtx.fill();
+      });
+      constellationCtx.restore();
+    }
+
+    function displayFortune() {
+      const fortune = fortunes[Math.floor(Math.random() * fortunes.length)];
+      resultCard.innerHTML = `
+        <div class="text-left space-y-4">
+          <div>
+            <h3 class="text-2xl font-semibold text-emerald-300">${fortune.title}</h3>
+          </div>
+          ${fortune.body.split('\n\n').map(paragraph => `<p class="leading-relaxed text-slate-200">${paragraph}</p>`).join('')}
+        </div>
+      `;
+    }
+
+    function displayError(message) {
+      errorCard.textContent = message;
+      errorCard.classList.remove('hidden');
+      statusMessage.textContent = message;
+    }
+
+    function clearError() {
+      errorCard.classList.add('hidden');
+      errorCard.textContent = '';
+    }
+
+    window.addEventListener('resize', () => {
+      if (constellationOverlay.classList.contains('active')) {
+        resizeConstellationCanvas();
+      }
+    });
+  </script>
+</body>
+</html>
